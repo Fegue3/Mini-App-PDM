@@ -112,7 +112,7 @@ class _SensorsPageState extends State<SensorsPage> {
     final ay = _accel?.y;
 
     final alignX = -_normAlign(ax); // inverte para a esquerda/direita ficar certo
-    final alignY = -_normAlign(ay); // invertido para cima/baixo
+    final alignY = _normAlign(ay); // invertido para cima/baixo
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
