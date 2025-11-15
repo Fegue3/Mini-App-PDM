@@ -11,8 +11,12 @@ class SensorsPage extends StatefulWidget {
 }
 
 class _SensorsPageState extends State<SensorsPage> {
-  AccelerometerEvent? _accel; // últimos valores do acelerómetro
+  AccelerometerEvent? _accel; // últimos valores do acelerómetro (raw)
   GyroscopeEvent? _gyro;      // últimos valores do giroscópio
+
+  // valores suavizados para a demo da bolinha
+  double? _axSmooth;
+  double? _aySmooth;
 
   StreamSubscription<AccelerometerEvent>? _accelSub; // subscrição do acelerómetro
   StreamSubscription<GyroscopeEvent>? _gyroSub;      // subscrição do giroscópio
@@ -23,6 +27,17 @@ class _SensorsPageState extends State<SensorsPage> {
 
     // começa a ouvir eventos do acelerómetro
     _accelSub = accelerometerEvents.listen((event) {
+      // low-pass filter simples: aproxima 20% do valor novo
+      const alpha = 0.2;
+
+      _axSmooth = _axSmooth == null
+          ? event.x
+          : _axSmooth! + (event.x - _axSmooth!) * alpha;
+
+      _aySmooth = _aySmooth == null
+          ? event.y
+          : _aySmooth! + (event.y - _aySmooth!) * alpha;
+
       setState(() => _accel = event);
     });
 
@@ -49,7 +64,7 @@ class _SensorsPageState extends State<SensorsPage> {
   double _normAlign(double? v) {
     if (v == null) return 0;
     const max = 8.0;
-    double value = v;
+    var value = v;
     if (value > max) value = max;
     if (value < -max) value = -max;
     return value / max;
@@ -111,10 +126,10 @@ class _SensorsPageState extends State<SensorsPage> {
     );
   }
 
-  // demo visual: bolinha que se mexe com o acelerómetro
+  // demo visual: bolinha que se mexe com o acelerómetro (suavizada)
   Widget _buildAccelDemoCard() {
-    final ax = _accel?.x;
-    final ay = _accel?.y;
+    final ax = _axSmooth ?? _accel?.x;
+    final ay = _aySmooth ?? _accel?.y;
 
     // invertido no X para corresponder à sensação de esquerda/direita
     final alignX = -_normAlign(ax);
@@ -156,11 +171,13 @@ class _SensorsPageState extends State<SensorsPage> {
                   border: Border.all(color: Colors.grey.shade400, width: 2),
                   color: Colors.grey.shade100,
                 ),
-                child: Align(
+                child: AnimatedAlign(
                   alignment: Alignment(
                     alignX.clamp(-1.0, 1.0),
                     alignY.clamp(-1.0, 1.0),
                   ),
+                  duration: const Duration(milliseconds: 70),
+                  curve: Curves.easeOut,
                   child: Container(
                     width: 26,
                     height: 26,
