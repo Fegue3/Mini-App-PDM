@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' show Position;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mbx;
 
-import '../services/location_service.dart';
+import '../services/location_service.dart'; // serviço centralizado para GPS/localização
 
 class GpsPage extends StatefulWidget {
   const GpsPage({super.key});
@@ -14,23 +14,23 @@ class GpsPage extends StatefulWidget {
 }
 
 class _GpsPageState extends State<GpsPage> {
-  mbx.MapboxMap? _mapboxMap;
-  mbx.Point? _currentLocation;
-  bool _isLoading = true;
-  bool _isMapAlive = false;
-  String? _error;
+  mbx.MapboxMap? _mapboxMap;          // referência ao mapa
+  mbx.Point? _currentLocation;        // posição actual do utilizador
+  bool _isLoading = true;             // a carregar localização inicial
+  bool _isMapAlive = false;           // protege chamadas depois de dispose
+  String? _error;                     // mensagem de erro (se existir)
 
-  mbx.CircleAnnotationManager? _userCircleManager;
-  mbx.CircleAnnotation? _userCircle;
-  mbx.CircleAnnotation? _userHalo;
-  StreamSubscription<Position>? _posSub;
+  mbx.CircleAnnotationManager? _userCircleManager; // gestor de anotações (círculos)
+  mbx.CircleAnnotation? _userCircle;               // círculo central (ponto do user)
+  mbx.CircleAnnotation? _userHalo;                 // “halo” em volta do user
+  StreamSubscription<Position>? _posSub;           // subscrição de updates de posição
 
-  static const _ecoMint = Color(0xFF3CD4A0);
+  static const _ecoMint = Color(0xFF3CD4A0);       // cor base para o indicador do user
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _init(); // arranque: pedir permissões e obter posição inicial
   }
 
   Future<void> _init() async {
@@ -46,7 +46,9 @@ class _GpsPageState extends State<GpsPage> {
       return;
     }
 
-    final p = await LocationService.instance.getCurrentLocation();
+    // posição inicial (single shot, mas a pedir fix “fresco”)
+    final p =
+        await LocationService.instance.getCurrentLocation(forceFresh: true);
     if (!mounted) return;
 
     setState(() {
@@ -57,22 +59,25 @@ class _GpsPageState extends State<GpsPage> {
     });
   }
 
+  /// Chamado quando o widget do mapa está pronto
   Future<void> _onMapCreated(mbx.MapboxMap map) async {
     _mapboxMap = map;
     _isMapAlive = true;
 
     try {
-      // desligamos o "ponto azul" nativo para usar o nosso indicador custom
+      // desactiva o "ponto azul" nativo e usamos apenas o nosso indicador custom
       await _mapboxMap!.location
           .updateSettings(mbx.LocationComponentSettings(enabled: false));
     } catch (_) {}
 
     await _ensureUserIndicator();
 
+    // centra a câmara na localização inicial, se existir
     if (_currentLocation != null) {
       await _moveCameraTo(_currentLocation!, animated: false);
     }
 
+    // fluxo contínuo de updates de GPS
     _posSub ??=
         LocationService.instance.getLocationUpdates().listen((pos) async {
       if (!_isMapAlive) return;
@@ -83,6 +88,7 @@ class _GpsPageState extends State<GpsPage> {
     });
   }
 
+  /// Cria o círculo/hâlo do utilizador (apenas se ainda não existir)
   Future<void> _ensureUserIndicator() async {
     if (!_isMapAlive || _mapboxMap == null || _currentLocation == null) return;
 
@@ -90,35 +96,37 @@ class _GpsPageState extends State<GpsPage> {
       _userCircleManager ??=
           await _mapboxMap!.annotations.createCircleAnnotationManager();
 
+      // halo com menos opacidade
       _userHalo ??= await _userCircleManager!.create(
         mbx.CircleAnnotationOptions(
           geometry: _currentLocation!,
           circleRadius: 22.0,
-          circleColor: _ecoMint.withOpacity(0.25).value,
+          circleColor: _ecoMint.toARGB32(),
+          circleOpacity: 0.25,
         ),
       );
 
+      // círculo central
       _userCircle ??= await _userCircleManager!.create(
         mbx.CircleAnnotationOptions(
           geometry: _currentLocation!,
           circleRadius: 8.0,
-          circleColor: _ecoMint.value,
-          circleStrokeColor: 0xFFFFFFFF,
+          circleColor: _ecoMint.toARGB32(),
+          circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
           circleStrokeWidth: 2.5,
         ),
       );
     } catch (_) {}
   }
 
+  /// Actualiza a posição do indicador do utilizador no mapa
   Future<void> _updateUserIndicator(mbx.Point pt) async {
     if (!_isMapAlive) return;
 
     try {
-      if (_userCircleManager == null) {
-        await _ensureUserIndicator();
-        return;
-      }
-      if (_userHalo == null || _userCircle == null) {
+      if (_userCircleManager == null ||
+          _userHalo == null ||
+          _userCircle == null) {
         await _ensureUserIndicator();
         return;
       }
@@ -130,6 +138,7 @@ class _GpsPageState extends State<GpsPage> {
     } catch (_) {}
   }
 
+  /// Move a câmara para um ponto (com ou sem animação)
   Future<void> _moveCameraTo(
     mbx.Point target, {
     bool animated = true,
@@ -154,11 +163,14 @@ class _GpsPageState extends State<GpsPage> {
     } catch (_) {}
   }
 
+  /// Handler do botão "Obter / ir para a minha localização"
   Future<void> _goToUser() async {
     final ok = await LocationService.instance.checkPermissions();
     if (!ok) return;
 
-    final pos = await LocationService.instance.getCurrentLocation();
+    // aqui também usamos o fix “fresco”
+    final pos =
+        await LocationService.instance.getCurrentLocation(forceFresh: true);
     if (pos == null) return;
 
     final target =
@@ -180,7 +192,7 @@ class _GpsPageState extends State<GpsPage> {
 
     return Stack(
       children: [
-        // MAPA (sem styleUri -> default da Mapbox)
+        // mapa principal
         Positioned.fill(
           child: mbx.MapWidget(
             onMapCreated: _onMapCreated,
@@ -191,7 +203,7 @@ class _GpsPageState extends State<GpsPage> {
           ),
         ),
 
-        // Mensagem de erro (se houver)
+        // barra de erro no topo, se existir algum erro de GPS/permissões
         if (_error != null)
           Positioned(
             left: 16,
@@ -200,7 +212,7 @@ class _GpsPageState extends State<GpsPage> {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.9),
+                color: Colors.red.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -210,7 +222,7 @@ class _GpsPageState extends State<GpsPage> {
             ),
           ),
 
-        // Botão "Obter localização" em cima
+        // botão para recentrar no utilizador
         Positioned(
           left: 16,
           right: 16,

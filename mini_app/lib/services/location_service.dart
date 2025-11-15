@@ -9,12 +9,13 @@ class LocationService {
 
   /// Verifica e pede permissões de localização
   Future<bool> checkPermissions() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       return false;
     }
 
-    LocationPermission permission = await Geolocator.checkPermission();
+    var permission = await Geolocator.checkPermission();
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
@@ -29,17 +30,28 @@ class LocationService {
     return true;
   }
 
-  /// Posição atual
-  Future<Position?> getCurrentLocation() async {
+  /// Posição actual (opcionalmente força um fix “fresco” via stream)
+  Future<Position?> getCurrentLocation({bool forceFresh = false}) async {
     final hasPermission = await checkPermissions();
     if (!hasPermission) return null;
 
     try {
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
+      if (!forceFresh) {
+        // leitura "normal"
+        return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+      }
+
+      // força um fix novo, lendo o primeiro valor do stream
+      const settings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
       );
+
+      return await Geolocator.getPositionStream(
+        locationSettings: settings,
+      ).first.timeout(const Duration(seconds: 10));
     } catch (e) {
       // ignore: avoid_print
       print('Error getting current location: $e');
@@ -47,7 +59,7 @@ class LocationService {
     }
   }
 
-  /// Stream de updates de localização
+  /// Stream de updates de localização contínuos
   Stream<Position> getLocationUpdates() {
     return Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -57,9 +69,11 @@ class LocationService {
     );
   }
 
-  /// Morada a partir de coordenadas
+  /// Morada (string) a partir de coordenadas
   Future<String?> getAddressFromCoordinates(
-      double latitude, double longitude) async {
+    double latitude,
+    double longitude,
+  ) async {
     try {
       final placemarks = await placemarkFromCoordinates(latitude, longitude);
       if (placemarks.isNotEmpty) {
@@ -75,7 +89,7 @@ class LocationService {
     }
   }
 
-  /// Coordenadas a partir de morada
+  /// Coordenadas a partir de uma morada (usa geocoding -> devolve Position)
   Future<Position?> getCoordinatesFromAddress(String address) async {
     try {
       final locations = await locationFromAddress(address);

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+import 'package:sensors_plus/sensors_plus.dart'; // acesso ao acelerómetro/giroscópio
 
 class SensorsPage extends StatefulWidget {
   const SensorsPage({super.key});
@@ -11,20 +11,22 @@ class SensorsPage extends StatefulWidget {
 }
 
 class _SensorsPageState extends State<SensorsPage> {
-  AccelerometerEvent? _accel;
-  GyroscopeEvent? _gyro;
+  AccelerometerEvent? _accel; // últimos valores do acelerómetro
+  GyroscopeEvent? _gyro;      // últimos valores do giroscópio
 
-  StreamSubscription<AccelerometerEvent>? _accelSub;
-  StreamSubscription<GyroscopeEvent>? _gyroSub;
+  StreamSubscription<AccelerometerEvent>? _accelSub; // subscrição do acelerómetro
+  StreamSubscription<GyroscopeEvent>? _gyroSub;      // subscrição do giroscópio
 
   @override
   void initState() {
     super.initState();
 
+    // começa a ouvir eventos do acelerómetro
     _accelSub = accelerometerEvents.listen((event) {
       setState(() => _accel = event);
     });
 
+    // começa a ouvir eventos do giroscópio
     _gyroSub = gyroscopeEvents.listen((event) {
       setState(() => _gyro = event);
     });
@@ -32,6 +34,7 @@ class _SensorsPageState extends State<SensorsPage> {
 
   @override
   void dispose() {
+    // cancela streams para evitar memory leaks
     _accelSub?.cancel();
     _gyroSub?.cancel();
     super.dispose();
@@ -39,20 +42,22 @@ class _SensorsPageState extends State<SensorsPage> {
 
   // -------- helpers --------
 
+  // formata número com 2 casas decimais (ou '-' se nulo)
   String _fmt(double? v) => v == null ? '-' : v.toStringAsFixed(2);
 
-  // normaliza valor para -1..1 (para Alignment)
+  // normaliza valor para -1..1 (para usar em Alignment)
   double _normAlign(double? v) {
     if (v == null) return 0;
     const max = 8.0;
     double value = v;
     if (value > max) value = max;
     if (value < -max) value = -max;
-    return value / max; // -1..1
+    return value / max;
   }
 
   // -------- widgets --------
 
+  // cartão genérico para mostrar X/Y/Z de um sensor
   Widget _buildSensorCard({
     required String title,
     required IconData icon,
@@ -111,8 +116,9 @@ class _SensorsPageState extends State<SensorsPage> {
     final ax = _accel?.x;
     final ay = _accel?.y;
 
-    final alignX = -_normAlign(ax); // inverte para a esquerda/direita ficar certo
-    final alignY = _normAlign(ay); // invertido para cima/baixo
+    // invertido no X para corresponder à sensação de esquerda/direita
+    final alignX = -_normAlign(ax);
+    final alignY = _normAlign(ay);
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

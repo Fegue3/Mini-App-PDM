@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart';          // plugin para usar a câmara
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:permission_handler/permission_handler.dart'; // gerir permissões
 
 class CameraPage extends StatefulWidget {
   const CameraPage({super.key});
@@ -12,16 +12,16 @@ class CameraPage extends StatefulWidget {
 }
 
 class _CameraPageState extends State<CameraPage> {
-  List<CameraDescription> _cameras = [];
-  CameraController? _controller;
+  List<CameraDescription> _cameras = []; // câmaras disponíveis no dispositivo
+  CameraController? _controller;        // controlador da câmara actual
 
   bool _loading = true;
   bool _showCamera = false;
   bool _flashOn = false;
 
-  int _cameraIndex = 0; // só usamos a câmara [0]
-  XFile? _lastPicture;
-  String? _error;
+  int _cameraIndex = 0;   // usamos sempre a primeira câmara
+  XFile? _lastPicture;    // última foto tirada
+  String? _error;         // mensagem de erro (se existir)
 
   @override
   void initState() {
@@ -36,7 +36,7 @@ class _CameraPageState extends State<CameraPage> {
         _error = null;
       });
 
-      // Permissão da câmara
+      // 1) Garantir permissão da câmara
       var status = await Permission.camera.status;
       if (!status.isGranted) {
         status = await Permission.camera.request();
@@ -49,7 +49,7 @@ class _CameraPageState extends State<CameraPage> {
         }
       }
 
-      // Obter câmaras disponíveis
+      // 2) Obter lista de câmaras disponíveis
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
         setState(() {
@@ -59,9 +59,7 @@ class _CameraPageState extends State<CameraPage> {
         return;
       }
 
-      // usa simplesmente a primeira câmara disponível
       _cameraIndex = 0;
-
       await _initController();
     } catch (e) {
       setState(() {
@@ -83,14 +81,14 @@ class _CameraPageState extends State<CameraPage> {
     _controller = CameraController(
       cam,
       ResolutionPreset.medium,
-      enableAudio: false,
+      enableAudio: false, // só fotos, sem áudio
     );
 
     await _controller!.initialize();
     await _controller!.setFlashMode(FlashMode.off);
     _flashOn = false;
 
-    await old?.dispose();
+    await old?.dispose(); // liberta o controlador anterior (se existir)
     if (mounted) {
       setState(() {});
     }
@@ -98,6 +96,7 @@ class _CameraPageState extends State<CameraPage> {
 
   Future<void> _toggleFlash() async {
     if (!(_controller?.value.isInitialized ?? false)) return;
+
     _flashOn = !_flashOn;
 
     await _controller!.setFlashMode(
@@ -150,7 +149,6 @@ class _CameraPageState extends State<CameraPage> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          // Botão abrir/fechar câmara
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -165,7 +163,6 @@ class _CameraPageState extends State<CameraPage> {
           ),
           const SizedBox(height: 12),
 
-          // Preview + controlos
           if (_showCamera && hasCamera) ...[
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -218,7 +215,7 @@ class _CameraPageState extends State<CameraPage> {
               child: Image.file(
                 File(_lastPicture!.path),
                 width: double.infinity,
-                fit: BoxFit.contain, // mostra a foto inteira, sem cortar
+                fit: BoxFit.contain,
               ),
             )
           else
