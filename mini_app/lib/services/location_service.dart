@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
@@ -7,55 +9,129 @@ class LocationService {
 
   static LocationService get instance => _instance;
 
+  /// Flag interno: true quando a permissão foi ACABADA de ser dada.
+  bool _justGrantedPermission = false;
+
   /// Verifica e pede permissões de localização
+  ///
+  /// 1. Primeiro trata das permissões (popup do sistema).
+  /// 2. Só depois verifica se o serviço de localização está ligado.
+  /// 3. Se a permissão foi concedida agora, marca `_justGrantedPermission = true`.
   Future<bool> checkPermissions() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
+    // estado inicial da permissão
+    final initialPermission = await Geolocator.checkPermission();
+    var permission = initialPermission;
+
+    // 1) PERMISSÕES
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      // user recusou ou bloqueou
       return false;
     }
 
-    var permission = await Geolocator.checkPermission();
+    // se antes era denied/deniedForever e agora é whileInUse/always,
+    // significa que o user ACABOU de dar permissão
+    final isNowGranted = permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always;
+    final wasDeniedBefore = initialPermission == LocationPermission.denied ||
+        initialPermission == LocationPermission.deniedForever;
 
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        return false;
-      }
+    if (isNowGranted && wasDeniedBefore) {
+      _justGrantedPermission = true;
     }
 
-    if (permission == LocationPermission.deniedForever) {
+    // 2) SERVIÇO DE LOCALIZAÇÃO (GPS / network)
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // opcional: podes abrir diretamente as settings
+      // await Geolocator.openLocationSettings();
       return false;
     }
 
     return true;
   }
 
-  /// Posição actual (opcionalmente força um fix “fresco” via stream)
+  /// Posição actual
+  ///
+  /// Estratégia normal:
+  /// 1. Tenta obter posição "rápida" (getCurrentPosition com timeLimit).
+  /// 2. Se der timeout, tenta lastKnownPosition.
+  /// 3. Se forceFresh == true, como fallback tenta stream com timeout pequeno.
+  ///
+  /// EXTRA:
+  /// - Se `_justGrantedPermission == true`, nesta chamada faz SEMPRE
+  ///   um fix "fresco" pelo stream com timeout maior (10s) e depois limpa o flag.
   Future<Position?> getCurrentLocation({bool forceFresh = false}) async {
     final hasPermission = await checkPermissions();
     if (!hasPermission) return null;
 
-    try {
-      if (!forceFresh) {
-        // leitura "normal"
-        return await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
+    // Caso especial: ACABÁMOS de ganhar permissão → garantir 1ª localização "a sério"
+    if (_justGrantedPermission) {
+      _justGrantedPermission = false;
+
+      try {
+        const settings = LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 0,
         );
+
+        final freshPos = await Geolocator.getPositionStream(
+          locationSettings: settings,
+        ).first.timeout(const Duration(seconds: 10));
+
+        return freshPos;
+      } on TimeoutException {
+        // se mesmo assim não vier nada, caímos no fluxo normal abaixo
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error getting first fresh location after permission: $e');
+      }
+    }
+
+    // Fluxo normal
+    try {
+      // tentativa rápida (normalmente quase instantâneo se o SO tiver fix recente)
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 3),
+      );
+      return pos;
+    } on TimeoutException {
+      // se demorar demais, tentamos o último ponto conhecido
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && !forceFresh) {
+        return last;
       }
 
-      // força um fix novo, lendo o primeiro valor do stream
-      const settings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 0,
-      );
+      if (!forceFresh) {
+        return last; // pode ser null
+      }
 
-      return await Geolocator.getPositionStream(
-        locationSettings: settings,
-      ).first.timeout(const Duration(seconds: 10));
+      // caller pediu "fresco": tentamos stream mas com timeout curto
+      try {
+        const settings = LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 0,
+        );
+
+        return await Geolocator.getPositionStream(
+          locationSettings: settings,
+        ).first.timeout(const Duration(seconds: 5));
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error getting fresh location from stream: $e');
+        return last;
+      }
     } catch (e) {
       // ignore: avoid_print
       print('Error getting current location: $e');
-      return null;
+      final last = await Geolocator.getLastKnownPosition();
+      return last;
     }
   }
 

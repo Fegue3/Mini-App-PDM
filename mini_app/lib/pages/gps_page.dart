@@ -13,19 +13,23 @@ class GpsPage extends StatefulWidget {
   State<GpsPage> createState() => _GpsPageState();
 }
 
-class _GpsPageState extends State<GpsPage> {
-  mbx.MapboxMap? _mapboxMap;          // referência ao mapa
-  mbx.Point? _currentLocation;        // posição actual do utilizador
-  bool _isLoading = true;             // a carregar localização inicial
-  bool _isMapAlive = false;           // protege chamadas depois de dispose
-  String? _error;                     // mensagem de erro (se existir)
+class _GpsPageState extends State<GpsPage>
+    with AutomaticKeepAliveClientMixin<GpsPage> {
+  mbx.MapboxMap? _mapboxMap; // referência ao mapa
+  mbx.Point? _currentLocation; // posição actual do utilizador
+  bool _isLoading = true; // a carregar localização inicial
+  bool _isMapAlive = false; // protege chamadas depois de dispose
+  String? _error; // mensagem de erro (se existir)
 
   mbx.CircleAnnotationManager? _userCircleManager; // gestor de anotações (círculos)
-  mbx.CircleAnnotation? _userCircle;               // círculo central (ponto do user)
-  mbx.CircleAnnotation? _userHalo;                 // “halo” em volta do user
-  StreamSubscription<Position>? _posSub;           // subscrição de updates de posição
+  mbx.CircleAnnotation? _userCircle; // círculo central (ponto do user)
+  mbx.CircleAnnotation? _userHalo; // “halo” em volta do user
+  StreamSubscription<Position>? _posSub; // subscrição de updates de posição
 
-  static const _ecoMint = Color(0xFF3CD4A0);       // cor base para o indicador do user
+  static const _ecoMint = Color(0xFF3CD4A0); // cor base para o indicador do user
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -39,22 +43,28 @@ class _GpsPageState extends State<GpsPage> {
 
     if (!ok) {
       setState(() {
-        _error = 'Permissões ou serviços de localização não disponíveis.';
+        _error = 'Permissões/GPS não disponíveis. '
+            'Ativa a localização e dá permissão à app.';
         _currentLocation = null;
         _isLoading = false;
       });
       return;
     }
 
-    // posição inicial (single shot, mas a pedir fix “fresco”)
+    // posição inicial – agora tentamos algo rápido, sem forçar stream lento
     final p =
-        await LocationService.instance.getCurrentLocation(forceFresh: true);
+        await LocationService.instance.getCurrentLocation(forceFresh: false);
     if (!mounted) return;
 
     setState(() {
-      _currentLocation = (p != null)
-          ? mbx.Point(coordinates: mbx.Position(p.longitude, p.latitude))
-          : null;
+      if (p == null) {
+        _error = 'Não foi possível obter a tua localização inicial.';
+        _currentLocation = null;
+      } else {
+        _error = null;
+        _currentLocation =
+            mbx.Point(coordinates: mbx.Position(p.longitude, p.latitude));
+      }
       _isLoading = false;
     });
   }
@@ -150,7 +160,12 @@ class _GpsPageState extends State<GpsPage> {
       zoom: 15,
       bearing: 0,
       pitch: 0,
-      padding: mbx.MbxEdgeInsets(top: 0, left: 0, right: 0, bottom: 0),
+      padding: mbx.MbxEdgeInsets(
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      ),
     );
 
     try {
@@ -166,16 +181,33 @@ class _GpsPageState extends State<GpsPage> {
   /// Handler do botão "Obter / ir para a minha localização"
   Future<void> _goToUser() async {
     final ok = await LocationService.instance.checkPermissions();
-    if (!ok) return;
+    if (!ok) {
+      if (!mounted) return;
+      setState(() {
+        _error =
+            'GPS desligado ou sem permissões. Ativa nas definições do sistema.';
+      });
+      return;
+    }
 
-    // aqui também usamos o fix “fresco”
+    // aqui tentamos 1º algo rápido, e só depois forçamos "fresh" se precisar
     final pos =
         await LocationService.instance.getCurrentLocation(forceFresh: true);
-    if (pos == null) return;
+    if (pos == null) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Não consegui obter a tua localização agora.';
+      });
+      return;
+    }
 
     final target =
         mbx.Point(coordinates: mbx.Position(pos.longitude, pos.latitude));
-    _currentLocation = target;
+
+    setState(() {
+      _error = null;
+      _currentLocation = target;
+    });
 
     await _ensureUserIndicator();
     await _moveCameraTo(target, animated: true);
@@ -183,6 +215,8 @@ class _GpsPageState extends State<GpsPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     final padding = MediaQuery.of(context).padding;
     final safeTop = padding.top;
 
@@ -195,6 +229,7 @@ class _GpsPageState extends State<GpsPage> {
         // mapa principal
         Positioned.fill(
           child: mbx.MapWidget(
+            key: const ValueKey('gps-map'), // ajuda a manter estado estável
             onMapCreated: _onMapCreated,
             cameraOptions: mbx.CameraOptions(
               center: _currentLocation,
